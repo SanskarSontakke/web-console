@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Raspberry Pi Web Console (xterm.js)</title>
+    <!-- Include xterm.js library -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" />
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+    <!-- Include the Fit Addon for resizing -->
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+
+    <style>
+        body { font-family: sans-serif; margin: 0; background-color: #1e1e1e; }
+        /* Make terminal container fill the viewport */
+        #terminal-container {
+            position: fixed; /* Or absolute */
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            bottom: 10px;
+            overflow: hidden; /* Container handles overflow */
+        }
+        /* xterm.js needs an inner div to attach to */
+        #terminal {
+            width: 100%;
+            height: 100%;
+        }
+        /* Styling for the xterm viewport/scrollbar (optional) */
+        .xterm .xterm-viewport {
+            overflow-y: scroll; /* Or auto */
+        }
+    </style>
+</head>
+<body>
+    <div id="terminal-container">
+        <div id="terminal"></div> <!-- xterm.js attaches here -->
+    </div>
+
+    <!-- Include Socket.IO client library -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io(); // Connect to the server
+
+        // --- Terminal Setup ---
+        const term = new Terminal({
+            cursorBlink: true,
+            // You can customize theme here, e.g.:
+            theme: {
+                background: '#2b2b2b',
+                foreground: '#f0f0f0',
+                cursor: '#f0f0f0'
+            }
+            // Add other xterm options if needed
+        });
+
+        // Load the Fit Addon
+        const fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+
+        // Open the terminal in the #terminal div
+        const terminalContainer = document.getElementById('terminal');
+        term.open(terminalContainer);
+
+        // --- Initial Sizing ---
+        function fitTerminal() {
+             try {
+                fitAddon.fit(); // Calculate and apply new dimensions
+                const dims = { cols: term.cols, rows: term.rows };
+                console.log('Terminal resized:', dims);
+                // Send dimensions to the server to resize the PTY
+                socket.emit('pty-resize', dims);
+            } catch (e) {
+                console.error("Error fitting terminal:", e);
+                // If fit fails early, try a default size or wait
+            }
+        }
+
+        // Fit the terminal when the window loads and is resized
+        window.addEventListener('load', fitTerminal); // Fit on load
+        window.addEventListener('resize', () => { // Fit on resize
+            // Debounce resize event for performance if needed
+            fitTerminal();
+        });
+
+
+        // --- Data Flow ---
+
+        // 1. Server Output (WebSocket) -> Terminal
+        // Write data received from the server's PTY to the xterm.js instance
+        socket.on('pty-output', (data) => {
+            term.write(data);
+        });
+
+
+        // 2. Terminal Input -> Server (WebSocket)
+        // Send user input from xterm.js to the server to be written to the PTY
+        term.onData((data) => {
+            socket.emit('pty-input', data);
+        });
+
+
+        // --- Connection Handling ---
+        socket.on('connect', () => {
+            term.write('\r\n*** Connected to backend ***\r\n');
+            // Fit terminal after connection established and elements are ready
+            setTimeout(fitTerminal, 100); // Small delay might help ensure layout is stable
+        });
+
+        socket.on('disconnect', () => {
+            term.write('\r\n*** Disconnected from backend ***\r\n');
+        });
+
+        // Give the terminal focus
+        term.focus();
+
+    </script>
+</body>
+</html>
